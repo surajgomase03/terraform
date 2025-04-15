@@ -59,10 +59,14 @@ resource "aws_instance" "first_ec2" {
     #Name = "${var.env}-ec2"
     Env = var.env
   }
+  depends_on = [ aws_security_group.first_sg ]
 }
 
 output "ec2_public_ip" {
+  #outputs for count
   #value = aws_instance.first_ec2[*].public_ip
+
+  # outputs for for_each
    value = [
     for instance in aws_instance.first_ec2 : instace.public_ip
    ]
