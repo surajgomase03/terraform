@@ -37,11 +37,16 @@ resource "aws_security_group" "first_sg" {
 
 
 resource "aws_instance" "first_ec2" {
-  count = 2 #meta argumen, multiple resources
+  #count = 2 #meta argumen, multiple resources
+  for_each = tomap({
+    "first_instance" = "t2.micro"
+    "second_instance" = "t3.meduim"
+  })
   ami = var.ami_id
   key_name = aws_key_pair.first_key.key_name
   security_groups = [aws_security_group.first_sg]
-  instance_type = "t2.micro"
+  #instance_type = "t2.micro"
+  instance_type = each.value
   user_data = file("install.sh")
 
 
@@ -50,13 +55,18 @@ resource "aws_instance" "first_ec2" {
     volume_type = "gp3"
   }
   tags = {
-    Name = "${var.env}-ec2"
+    Name = each.key
+    #Name = "${var.env}-ec2"
     Env = var.env
   }
 }
 
 output "ec2_public_ip" {
-  value = aws_instance.first_ec2[*].public_ip
+  #value = aws_instance.first_ec2[*].public_ip
+   value = [
+    for instance in aws_instance.first_ec2 : instace.public_ip
+   ]
+
   
 }
 output "aws_ec2_dns" {
