@@ -18,7 +18,23 @@ module "eks" {
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
+  control_plane_subnet_ids = module.vpc.intra_subnets
 
+  eks_managed_node_group_defaults = {
+    
+    instance_types = ["m6i.large", "m5.large", "m5n.large", "m5zn.large"]
+    attach_cluster_primary_security_group = true
+  }
+
+  eks_managed_node_groups = {
+    node_grp_first = {
+      # Starting on 1.30, AL2023 is the default AMI type for EKS managed node groups
+      instance_types = ["m5.xlarge"]
+      min_size = 2
+      max_size = 2
+      desired_size = 2
+      capacity_type = "SPOT"
+    }
 
   tags = {
     Environment = "dev"
