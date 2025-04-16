@@ -35,7 +35,7 @@ module "eks" {
       desired_size = 2
       capacity_type = "SPOT"
     }
-
+  }
   tags = {
     Environment = "dev"
     Terraform   = "true"
