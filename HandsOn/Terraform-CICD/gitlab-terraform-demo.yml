@@ -1,0 +1,597 @@
+# .gitlab-ci.yml - Complete Terraform Pipeline Example
+
+# ============================================================================
+# GitLab CI/CD Pipeline for Terraform
+# Implements plan → approval → apply workflow with environment protection
+# ============================================================================
+
+stages:
+  - validate
+  - plan
+  - approve
+  - apply
+  - destroy
+  - validate_deployment
+
+# ============================================================================
+# Global Configuration
+# ============================================================================
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  TF_VERSION: "1.5.0"
+  AWS_REGION: "us-east-1"
+  TF_INPUT: "false"
+  TF_IN_AUTOMATION: "true"
+  TFSEC_ARGS: "--minimum-severity HIGH"
+
+# ============================================================================
+# Shared Job Template
+# ============================================================================
+
+.terraform_base:
+  image: hashicorp/terraform:${TF_VERSION}
+  before_script:
+    - cd ${TF_ROOT}
+    - |
+      terraform init \
+        -backend-config="bucket=terraform-state-${CI_ENVIRONMENT_NAME}" \
+        -backend-config="key=${CI_COMMIT_BRANCH}/terraform.tfstate" \
+        -backend-config="region=${AWS_REGION}" \
+        -backend-config="dynamodb_table=terraform-locks" \
+        -reconfigure
+  cache:
+    key: ${CI_COMMIT_BRANCH}
+    paths:
+      - ${TF_ROOT}/.terraform
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+
+# Terraform format validation
+terraform:fmt:
+  extends: .terraform_base
+  stage: validate
+  script:
+    - terraform fmt -check -recursive
+  artifacts:
+    reports:
+      junit: fmt-report.xml
+  allow_failure: true
+  only:
+    - merge_requests
+    - develop
+    - main
+
+# Terraform validation
+terraform:validate:
+  extends: .terraform_base
+  stage: validate
+  script:
+    - terraform validate
+  only:
+    - merge_requests
+    - develop
+    - main
+
+# Terraform security scanning with tfsec
+tfsec:scan:
+  image: aquasec/tfsec-ci:latest
+  stage: validate
+  script:
+    - tfsec ${TF_ROOT} -f json ${TFSEC_ARGS} > tfsec-report.json || true
+    - tfsec ${TF_ROOT} -f sarif ${TFSEC_ARGS} > tfsec-report.sarif || true
+    - tfsec ${TF_ROOT} ${TFSEC_ARGS}  # Display in logs
+  artifacts:
+    reports:
+      sast: tfsec-report.sarif
+    paths:
+      - tfsec-report.json
+    expire_in: 30 days
+  allow_failure: true
+  only:
+    - merge_requests
+    - develop
+    - main
+
+# Policy as code scanning with Checkov
+checkov:scan:
+  image: bridgecrewio/checkov:latest
+  stage: validate
+  script:
+    - |
+      checkov -d ${TF_ROOT} \
+        --framework terraform \
+        --output json \
+        > checkov-report.json || true
+    - checkov -d ${TF_ROOT} --framework terraform
+  artifacts:
+    paths:
+      - checkov-report.json
+    expire_in: 30 days
+  allow_failure: true
+  only:
+    - merge_requests
+    - develop
+    - main
+
+# ============================================================================
+# PLAN STAGE - Plan for each environment
+# ============================================================================
+
+.plan_base:
+  extends: .terraform_base
+  stage: plan
+  script:
+    - |
+      terraform plan \
+        -var-file="environments/${CI_ENVIRONMENT_NAME}.tfvars" \
+        -out=tfplan \
+        -json > plan.json
+    - terraform show -no-color tfplan > plan-output.txt
+    - |
+      # Extract resource change summary
+      ADDITIONS=$(jq '[.resource_changes[] | select(.change.actions[] == "create")] | length' plan.json)
+      MODIFICATIONS=$(jq '[.resource_changes[] | select(.change.actions[] == "update")] | length' plan.json)
+      DELETIONS=$(jq '[.resource_changes[] | select(.change.actions[] == "delete")] | length' plan.json)
+      
+      echo "Plan Summary:" > plan-summary.txt
+      echo "- Resources to create: $ADDITIONS" >> plan-summary.txt
+      echo "- Resources to modify: $MODIFICATIONS" >> plan-summary.txt
+      echo "- Resources to delete: $DELETIONS" >> plan-summary.txt
+      echo "- Total resources: $(jq '.resource_changes | length' plan.json)" >> plan-summary.txt
+  artifacts:
+    paths:
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/plan.json
+      - ${TF_ROOT}/plan-output.txt
+      - ${TF_ROOT}/plan-summary.txt
+    reports:
+      dotenv: plan.env
+    expire_in: 30 days
+  dependencies: []
+
+# Plan for development environment
+plan:dev:
+  extends: .plan_base
+  environment:
+    name: development
+  only:
+    - develop
+
+# Plan for staging environment
+plan:staging:
+  extends: .plan_base
+  environment:
+    name: staging
+  only:
+    - develop
+
+# Plan for production environment
+plan:prod:
+  extends: .plan_base
+  environment:
+    name: production
+  only:
+    - main
+
+# ============================================================================
+# APPROVE STAGE - Manual approvals
+# ============================================================================
+
+# Development approval (optional)
+approve:dev:
+  stage: approve
+  environment:
+    name: development
+  script:
+    - |
+      cat plan-${CI_ENVIRONMENT_NAME}-summary.txt
+      echo "Development environment ready for deployment"
+  when: manual
+  only:
+    - develop
+  dependencies:
+    - plan:dev
+
+# Staging approval (required)
+approve:staging:
+  stage: approve
+  environment:
+    name: staging
+  script:
+    - cat plan-staging-summary.txt
+  when: manual
+  only:
+    - develop
+  dependencies:
+    - plan:staging
+
+# Production approval (required with protected environment rules)
+approve:prod:
+  stage: approve
+  environment:
+    name: production
+    deployment_tier: production
+    # Protection rules configured in GitLab UI:
+    # - Required approvals: 2
+    # - Approver group: terraform-admins
+    # - Access: Maintainers only
+  script:
+    - cat plan-production-summary.txt
+    - echo "APPROVAL REQUIRED for production deployment"
+  when: manual
+  only:
+    - main
+  dependencies:
+    - plan:prod
+
+# ============================================================================
+# APPLY STAGE - Apply approved plans
+# ============================================================================
+
+.apply_base:
+  extends: .terraform_base
+  stage: apply
+  script:
+    - |
+      if [ ! -f tfplan ]; then
+        echo "ERROR: No plan artifact found!"
+        exit 1
+      fi
+      
+      # Apply the saved plan
+      terraform apply -auto-approve tfplan
+      
+      # Export outputs
+      terraform output -json > outputs.json
+      
+      # Create human-readable deployment info
+      cat > deployment-info.txt <<EOF
+Deployment Information
+======================
+Date: $(date)
+Commit: ${CI_COMMIT_SHA}
+Branch: ${CI_COMMIT_BRANCH}
+Author: ${CI_COMMIT_AUTHOR}
+Environment: ${CI_ENVIRONMENT_NAME}
+
+Resources Deployed:
+$(jq -r 'to_entries[] | "- \(.key): \(.value.value)"' outputs.json)
+EOF
+  artifacts:
+    paths:
+      - ${TF_ROOT}/outputs.json
+      - ${TF_ROOT}/deployment-info.txt
+      - ${TF_ROOT}/terraform.tfstate
+    reports:
+      dotenv: deployment.env
+    expire_in: 30 days
+  dependencies:
+    - approve:dev
+    - approve:staging
+    - approve:prod
+  environment:
+    kubernetes:
+      namespace: ${CI_ENVIRONMENT_NAME}
+    deployment_tier: ${DEPLOYMENT_TIER:-default}
+
+# Apply for development
+apply:dev:
+  extends: .apply_base
+  environment:
+    name: development
+  only:
+    - develop
+  dependencies:
+    - approve:dev
+
+# Apply for staging
+apply:staging:
+  extends: .apply_base
+  environment:
+    name: staging
+  only:
+    - develop
+  dependencies:
+    - approve:staging
+
+# Apply for production
+apply:prod:
+  extends: .apply_base
+  environment:
+    name: production
+    deployment_tier: production
+    url: https://prod.example.com
+    auto_stop_in: never
+  only:
+    - main
+  dependencies:
+    - approve:prod
+
+# ============================================================================
+# DESTROY STAGE - Only for development
+# ============================================================================
+
+destroy:dev:
+  extends: .terraform_base
+  stage: destroy
+  environment:
+    name: development
+    action: stop  # Mark as stop action
+  script:
+    - |
+      echo "⚠️ Destroying development infrastructure..."
+      terraform destroy -auto-approve
+  when: manual
+  only:
+    - develop
+  allow_failure: true
+
+# ============================================================================
+# POST-DEPLOYMENT VALIDATION
+# ============================================================================
+
+.validate_base:
+  image: amazon/aws-cli:latest
+  stage: validate_deployment
+  before_script:
+    - yum install -y jq curl
+    - export AWS_REGION=${AWS_REGION}
+
+# Validate development deployment
+validate:dev:
+  extends: .validate_base
+  environment:
+    name: development
+  script:
+    - |
+      echo "Validating development deployment..."
+      
+      # Check if state exists
+      BUCKET="terraform-state-development"
+      KEY="develop/terraform.tfstate"
+      
+      aws s3 cp s3://${BUCKET}/${KEY} . 2>/dev/null && \
+        echo "✓ State file exists" || \
+        echo "⚠️ State file not found"
+      
+      # Parse outputs
+      INSTANCE_IDS=$(jq -r '.outputs.instance_ids.value[]' terraform.tfstate 2>/dev/null || echo "")
+      
+      if [ -z "$INSTANCE_IDS" ]; then
+        echo "ℹ️ No instances found in state"
+        exit 0
+      fi
+      
+      # Check instance status
+      for INSTANCE in $INSTANCE_IDS; do
+        STATE=$(aws ec2 describe-instances \
+          --instance-ids $INSTANCE \
+          --query 'Reservations[0].Instances[0].State.Name' \
+          --output text 2>/dev/null || echo "not-found")
+        
+        if [ "$STATE" = "running" ]; then
+          echo "✓ Instance $INSTANCE is running"
+        else
+          echo "⚠️ Instance $INSTANCE status: $STATE"
+        fi
+      done
+  artifacts:
+    paths:
+      - validation-report.txt
+  when: on_success
+  only:
+    - develop
+  allow_failure: true
+  dependencies:
+    - apply:dev
+
+# Validate production deployment
+validate:prod:
+  extends: .validate_base
+  environment:
+    name: production
+  script:
+    - |
+      echo "Validating production deployment..."
+      
+      # More rigorous checks for production
+      BUCKET="terraform-state-production"
+      KEY="main/terraform.tfstate"
+      
+      aws s3 cp s3://${BUCKET}/${KEY} . || exit 1
+      echo "✓ Production state file retrieved"
+      
+      # Check all instances are running
+      INSTANCE_IDS=$(jq -r '.outputs.instance_ids.value[]' terraform.tfstate)
+      
+      FAILED=0
+      for INSTANCE in $INSTANCE_IDS; do
+        STATE=$(aws ec2 describe-instances \
+          --instance-ids $INSTANCE \
+          --query 'Reservations[0].Instances[0].State.Name' \
+          --output text)
+        
+        if [ "$STATE" != "running" ]; then
+          echo "❌ Instance $INSTANCE status: $STATE"
+          FAILED=$((FAILED + 1))
+        else
+          echo "✓ Instance $INSTANCE is running"
+        fi
+      done
+      
+      if [ $FAILED -gt 0 ]; then
+        echo "❌ $FAILED instances not running"
+        exit 1
+      fi
+      
+      echo "✓ All validation checks passed"
+  when: on_success
+  only:
+    - main
+  allow_failure: false
+  dependencies:
+    - apply:prod
+
+# ============================================================================
+# SCHEDULED JOBS - Drift detection
+# ============================================================================
+
+drift:detection:
+  extends: .terraform_base
+  stage: plan
+  environment:
+    name: production
+  script:
+    - |
+      echo "Checking for infrastructure drift..."
+      
+      terraform plan -json > drift-report.json
+      
+      # Count changes
+      CHANGES=$(jq '[.resource_changes[] | select(.change.actions[] != "no-op")] | length' drift-report.json)
+      
+      if [ "$CHANGES" -eq 0 ]; then
+        echo "✓ No drift detected"
+        exit 0
+      fi
+      
+      echo "⚠️ Drift detected: $CHANGES resources"
+      
+      # Create drift report
+      jq '.resource_changes[] | 
+          select(.change.actions[] != "no-op") | 
+          {address, actions}' drift-report.json > drift-changes.json
+      
+      # Notify Slack
+      curl -X POST https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK \
+        -H 'Content-Type: application/json' \
+        -d "{
+          \"text\": \"⚠️ Terraform drift detected in production\",
+          \"blocks\": [{
+            \"type\": \"section\",
+            \"text\": {
+              \"type\": \"mrkdwn\",
+              \"text\": \"*Terraform Drift Alert*\n$CHANGES resources out of sync\n<${CI_PIPELINE_URL}|View Pipeline>\"
+            }
+          }]
+        }" || true
+  artifacts:
+    paths:
+      - drift-report.json
+      - drift-changes.json
+    expire_in: 7 days
+  only:
+    - schedules
+  schedule:
+    # Run hourly drift detection
+    cron: "0 * * * *"
+  allow_failure: true
+
+# ============================================================================
+# BACKUP STAGE - Automated state backups
+# ============================================================================
+
+backup:state:
+  image: amazon/aws-cli:latest
+  stage: validate_deployment
+  script:
+    - |
+      echo "Backing up Terraform state..."
+      
+      for ENV in development staging production; do
+        BUCKET="terraform-state-${ENV}"
+        KEY="${ENV}/terraform.tfstate"
+        BACKUP_KEY="${ENV}/terraform.tfstate.$(date +%Y%m%d_%H%M%S)"
+        
+        # Copy current state to backup location
+        aws s3 cp s3://${BUCKET}/${KEY} s3://terraform-backups/${BACKUP_KEY} 2>/dev/null && \
+          echo "✓ Backed up ${ENV} state" || \
+          echo "⚠️ Could not backup ${ENV} state"
+      done
+  only:
+    - schedules
+  schedule:
+    cron: "0 2 * * *"  # Daily at 2 AM
+  allow_failure: true
+
+# ============================================================================
+# CLEANUP
+# ============================================================================
+
+cleanup:
+  stage: .post
+  script:
+    - rm -rf .terraform terraform.tfvars* tfplan *.json
+    - echo "✓ Cleanup completed"
+  when: always
+
+# ============================================================================
+# SUCCESS/FAILURE NOTIFICATIONS
+# ============================================================================
+
+success:notification:
+  stage: .post
+  script:
+    - |
+      case ${CI_ENVIRONMENT_NAME} in
+        production)
+          CHANNEL="prod-deployments"
+          TEXT="✓ Production deployment successful"
+          ;;
+        staging)
+          CHANNEL="staging-deployments"
+          TEXT="✓ Staging deployment successful"
+          ;;
+        *)
+          exit 0
+          ;;
+      esac
+      
+      curl -X POST https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK \
+        -H 'Content-Type: application/json' \
+        -d "{
+          \"channel\": \"#${CHANNEL}\",
+          \"text\": \"${TEXT}\nCommit: ${CI_COMMIT_SHA:0:8}\nAuthor: ${CI_COMMIT_AUTHOR}\"
+        }" || true
+  when: on_success
+  only:
+    - develop
+    - main
+
+failure:notification:
+  stage: .post
+  script:
+    - |
+      curl -X POST https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK \
+        -H 'Content-Type: application/json' \
+        -d "{
+          \"channel\": \"#infra-alerts\",
+          \"text\": \"❌ Terraform pipeline failed\",
+          \"blocks\": [{
+            \"type\": \"section\",
+            \"text\": {
+              \"type\": \"mrkdwn\",
+              \"text\": \"*Pipeline Failure*\nProject: ${CI_PROJECT_NAME}\nBranch: ${CI_COMMIT_BRANCH}\nJob: ${CI_JOB_NAME}\n<${CI_PIPELINE_URL}|View Details>\"
+            }
+          }]
+        }" || true
+  when: on_failure
+  only:
+    - develop
+    - main
+
+# ============================================================================
+# PIPELINE TIMING: 
+# 
+# 1. Validate (parallel): Format + Validate + Security Scans (2-3 min)
+# 2. Plan (parallel): Create plans for all environments (3-5 min)
+# 3. Approve (manual): Wait for approval (variable)
+# 4. Apply (sequential): Deploy to approved environment (5-10 min)
+# 5. Validate Deployment: Health checks (2-3 min)
+#
+# Total: ~15-25 minutes for full pipeline with approvals
+# ============================================================================
+
