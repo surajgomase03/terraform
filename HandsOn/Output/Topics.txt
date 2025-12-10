@@ -1,0 +1,5 @@
+Export resource data
+
+Output from modules
+
+sensitive output

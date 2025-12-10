@@ -1,0 +1,25 @@
+.terraform/
+*.tfstate
+.tfstate.backup
+.terraform.lock.hcl
+.crash.log
+override.tf
+override.tf.json
+terraform.tfvars.json
+*.backup
+
+# Ignore terraform provider binaries and plugin caches
+**/.terraform/**
+.terraform/**
+# Provider binaries
+**/terraform-provider-*.zip
+**/terraform-provider-*
+
+# Ignore variable files and local overrides
+*.tfvars
+*.tfvars.*
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store

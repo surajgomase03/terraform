@@ -1,0 +1,11 @@
+input variables
+
+variable types (string, number, bool, list, map, object)
+
+variable validation
+
+variable precedence
+
+variable files (.tfvars)
+
+sensitive variables

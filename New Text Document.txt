@@ -1,0 +1,361 @@
+Terraform Complete Topic List (Beginner → Advanced → Expert)
+✅ 1. Terraform Basics
+
+What is IaC
+
+Why Terraform
+
+Terraform vs CloudFormation vs Ansible
+
+Providers & Provisioners
+
+Basic Terminology
+
+resources
+
+data sources
+
+modules
+
+state
+
+Terraform workflow
+
+init
+
+plan
+
+apply
+
+destroy
+
+📦 2. Terraform Installation
+
+Installation on Linux / Windows / Mac
+
+Terraform CLI usage
+
+Terraform version & terraform fmt
+
+Terraform autocomplete
+
+Terraform state location
+
+🏗️ 3. Terraform Configuration Language (HCL)
+
+Blocks (resource, variable, output)
+
+Arguments
+
+Attributes
+
+Meta-arguments
+
+🔧 4. Providers
+
+Provider plugins
+
+Built-in vs external providers
+
+AWS provider
+
+Azure provider
+
+GCP provider
+
+provider configuration
+
+provider version constraints
+
+🏛️ 5. Resources
+
+Resource blocks
+
+Resource lifecycle
+
+Replace resources
+
+Count
+
+For_each
+
+Depends_on
+
+Resource addressing
+
+📚 6. Data Sources
+
+Data lookup
+
+refer existing cloud resources
+
+data in modules
+
+🎯 7. Variables
+
+input variables
+
+variable types (string, number, bool, list, map, object)
+
+variable validation
+
+variable precedence
+
+variable files (.tfvars)
+
+sensitive variables
+
+📤 8. Output Variables
+
+Export resource data
+
+Output from modules
+
+sensitive output
+
+🧠 9. Expressions
+
+Conditionals
+
+for loops
+
+functions
+
+dynamic blocks
+
+interpolation
+
+operator precedence
+
+🔁 10. Loops & Meta Arguments
+
+depends_on
+
+lifecycle
+
+for_each vs count
+
+create_before_destroy
+
+ignore_changes
+
+timeouts
+
+📦 11. Modules
+
+Root module
+
+Child modules
+
+Public registry modules
+
+local modules
+
+Module composition
+
+version pinning
+
+best practices
+
+🗄️ 12. Terraform State
+
+remote state
+
+local state
+
+state locking
+
+state manipulation
+
+terraform state commands
+
+drift detection
+
+statefile encryption
+
+state backup
+
+🌐 13. Remote Backend
+
+S3 backend
+
+DynamoDB locking
+
+Azure backend
+
+GCP backend
+
+Terraform Cloud backend
+
+Workspaces
+
+backend configuration
+
+👥 14. Terraform Workspace
+
+Workspace vs Environment
+
+Workspace commands
+
+Separate state per environment
+
+Workspace terraform cloud vs local
+
+🤖 15. Provisioners
+
+local-exec
+
+remote-exec
+
+file upload
+
+use cases
+
+when NOT to use provisioners
+
+🔐 16. Terraform Cloud & Enterprise
+
+Terraform Remote backend
+
+Workspace
+
+Run queue
+
+Remote execution
+
+Policy as code (Sentinel)
+
+Cost estimation
+
+VCS integration (GitHub/Jenkins)
+
+🛡️ 17. Terraform Security
+
+Secrets handling
+
+KMS encryption
+
+Hashicorp Vault integration
+
+tfsec
+
+trivy IAC scan
+
+IAM security
+
+📊 18. Terraform Testing
+
+terraform validate
+
+terraform fmt
+
+terraform test (unit test)
+
+Terratest (Go)
+
+policy as code
+
+📦 19. Terraform Registry
+
+Public registry
+
+Private registry
+
+publish custom modules
+
+module versions
+
+☁️ 20. Terraform on Cloud Providers
+
+AWS terraform modules
+
+Azure terraform modules
+
+GCP terraform modules
+
+Kubernetes terraform provider
+
+📜 21. Terraform Best Practices
+
+folder structure
+
+modules reuse
+
+naming conventions
+
+outputs handling
+
+DRY principle
+
+security practices
+
+👨‍💻 22. Terraform with CI/CD
+
+Terraform in Jenkins
+
+Terraform in GitHub Actions
+
+Terraform in GitLab
+
+automate plan & apply
+
+pipeline approvals
+
+🔥 23. Advanced Terraform Design
+
+Multi-account AWS architecture
+
+multi-region strategy
+
+terraform monorepo
+
+orchestration with Ansible
+
+immutable infra design
+
+live environments
+
+blue/green infra
+
+🧩 24. Interview Topics
+
+State drift
+
+Workspaces vs Modules
+
+Count vs For_each
+
+Terraform apply mistakes
+
+debug
+
+troubleshooting
+
+enterprise workflows
+
+⭐ Bonus: Terraform Real-World Use Cases
+
+VPC provisioning
+
+EKS provisioning
+
+AKS provisioning
+
+EC2 & ELB automation
+
+S3+CloudFront
+
+Lambda deployment
+
+Kubernetes cluster infra
+
+Multi-region networking
+
+Multi-target module design
+
+🎁 Complete Topics – Short Summary Table
+Level	Topics
+Basic	HCL, resources, variables, outputs
+Intermediate	modules, workspaces, state, backend
+Advanced	CI/CD, multi-cloud, testing
+Expert	security, enterprise, cost, architecture
