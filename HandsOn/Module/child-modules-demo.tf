@@ -332,3 +332,16 @@ output "instance_private_ips" {
 #    - Inheritance from parent is not reliable
 
 # ============================================================================
+data "aws_vpc" "name" {
+  filter {
+    name   = "isDefault"
+    values = ["true"]
+  }
+}
+output "default_vpc_id" {
+  value = data.aws_vpc.name.id
+  sensitive = true
+
+}
+
+

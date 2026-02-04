@@ -1,0 +1,77 @@
+pipeline {
+    īagent any
+
+    environment {
+        IMAGE_NAME = "surajg/app-demo"
+        DOCKER_HUB_CRED = "dockerhub-creds"
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/your-repo/app.git'
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                echo "Building application..."
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                echo "Running unit tests..."
+                sh 'mvn test'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo "Building Docker image..."
+                sh "docker build -t $IMAGE_NAME:${BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: "$DOCKER_HUB_CRED",
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh 'echo $PASS | docker login -u $USER --password-stdin'
+                }
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                echo "Pushing Docker image..."
+                sh "docker push $IMAGE_NAME:${BUILD_NUMBER}"
+            }
+        }
+
+        stage('Deploy Container') {
+            steps {
+                echo "Deploying container..."
+                sh '''
+                  docker rm -f app || true
+                  docker run -d -p 8080:8080 --name app $IMAGE_NAME:${BUILD_NUMBER}
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Pipeline executed successfully!"
+        }
+        failure {
+            echo "❌ Pipeline failed!"
+        }
+    }
+}
